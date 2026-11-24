@@ -3,406 +3,200 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🐸 emoji frogger · slow & simple</title>
+    <title>🐸 Giant Frog · Eat & Grow</title>
     <style>
         * {
             box-sizing: border-box;
             user-select: none;
+            -webkit-user-select: none;
         }
         body {
             margin: 0;
             min-height: 100vh;
-            background: #1f3b1f;
+            background: linear-gradient(135deg, #f3e8ff 0%, #e9d5ff 50%, #ddd6fe 100%);
             display: flex;
             justify-content: center;
             align-items: center;
-            font-family: 'Segoe UI', Roboto, system-ui, sans-serif;
+            font-family: 'Segoe UI', Roboto, system-ui, -apple-system, sans-serif;
             padding: 12px;
+            overflow: hidden;
         }
-        /* ultra-flat container – no nested borders, minimal chrome */
         .game-area {
-            background: #1f3b1f;
-            padding: 10px;
-            border-radius: 20px;
-            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.5);
-            max-width: 680px;
+            background: #faf5ff;
+            padding: 14px;
+            border-radius: 26px;
+            box-shadow: 0 14px 36px rgba(107, 33, 168, 0.18), 0 2px 6px rgba(107, 33, 168, 0.08);
+            border: 2px solid #e9d5ff;
+            max-width: 760px;
             width: 100%;
+            position: relative;
         }
-        canvas {
-            display: block;
-            margin: 0 auto;
-            border-radius: 16px;
-            background: #2a6b2a;
-            width: 100%;
-            height: auto;
-            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
-            cursor: crosshair;
-            touch-action: none;
-        }
-        /* single flat row for score + restart */
         .top-bar {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 10px;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 12px;
             padding: 0 4px;
-            color: #e9f5d0;
-            font-weight: bold;
-            font-size: 1.3rem;
-            text-shadow: 2px 2px 0 #0a1f0a;
+            color: #4c1d95;
+            font-weight: 800;
+            font-size: 1.05rem;
         }
-        .score {
-            background: #0d2b0d;
-            padding: 4px 18px;
-            border-radius: 40px;
-            letter-spacing: 1px;
-            box-shadow: inset 0 -2px 0 #4a7a4a;
+        .stats-group {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .pill {
+            background: #f3e8ff;
+            border: 1.5px solid #d8b4fe;
+            padding: 5px 14px;
+            border-radius: 999px;
+            letter-spacing: 0.3px;
+            box-shadow: inset 0 -2px 0 #e9d5ff;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .pill span.val {
+            color: #7e22ce;
+            font-variant-numeric: tabular-nums;
         }
         .restart {
-            background: #e7b42e;
+            background: linear-gradient(180deg, #a855f7 0%, #9333ea 100%);
             border: none;
-            font-size: 1.3rem;
-            padding: 4px 18px 6px;
-            border-radius: 40px;
+            font-size: 1rem;
+            padding: 6px 16px 7px;
+            border-radius: 999px;
             font-weight: 800;
-            color: #1e2a0e;
-            box-shadow: 0 4px 0 #8f6f1a;
+            color: #ffffff;
+            box-shadow: 0 4px 0 #6b21a8;
             cursor: pointer;
             font-family: inherit;
             display: flex;
             align-items: center;
             gap: 6px;
-            transition: 0.05s linear;
-            transform: translateY(-1px);
+            transition: transform 0.06s ease, box-shadow 0.06s ease;
+        }
+        .restart:hover {
+            background: linear-gradient(180deg, #b366f9 0%, #9f44f0 100%);
         }
         .restart:active {
-            box-shadow: 0 1px 0 #8f6f1a;
+            box-shadow: 0 1px 0 #6b21a8;
             transform: translateY(3px);
+        }
+        .canvas-wrapper {
+            position: relative;
+            border-radius: 18px;
+            overflow: hidden;
+            border: 2px solid #d8b4fe;
+            box-shadow: 0 6px 18px rgba(88, 28, 135, 0.16);
+            background: #ede9fe;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: auto;
+            cursor: pointer;
+            touch-action: none;
         }
         .hint {
             text-align: center;
-            margin-top: 8px;
-            color: #b8d9a4;
-            font-size: 0.95rem;
-            font-weight: 500;
-            letter-spacing: 0.5px;
+            margin-top: 10px;
+            color: #6b21a8;
+            font-size: 0.92rem;
+            font-weight: 600;
+            letter-spacing: 0.3px;
+        }
+        /* Game Over Modal Overlay */
+        .overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(46, 16, 101, 0.68);
+            backdrop-filter: blur(5px);
+            display: none;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            padding: 20px;
+            color: #ffffff;
+            z-index: 10;
+        }
+        .overlay.active {
+            display: flex;
+            animation: fadeIn 0.2s ease-out;
+        }
+        .overlay-card {
+            background: #faf5ff;
+            color: #3b0764;
+            border: 3px solid #c084fc;
+            border-radius: 24px;
+            padding: 24px 32px;
+            max-width: 380px;
+            width: 90%;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.35);
+        }
+        .overlay-card h2 {
+            margin: 0 0 8px;
+            font-size: 1.75rem;
+            color: #7e22ce;
+        }
+        .overlay-card p {
+            margin: 6px 0;
+            font-size: 1.05rem;
+            font-weight: 600;
+            color: #581c87;
+        }
+        .overlay-stats {
+            background: #f3e8ff;
+            border-radius: 14px;
+            padding: 12px;
+            margin: 14px 0 18px;
+            border: 1.5px solid #e9d5ff;
+        }
+        .play-again-btn {
+            background: linear-gradient(180deg, #a855f7 0%, #7e22ce 100%);
+            color: #fff;
+            border: none;
+            border-radius: 999px;
+            padding: 10px 28px;
+            font-size: 1.1rem;
+            font-weight: 800;
+            cursor: pointer;
+            box-shadow: 0 4px 0 #4c1d95;
+            transition: transform 0.06s ease;
+        }
+        .play-again-btn:active {
+            transform: translateY(3px);
+            box-shadow: 0 1px 0 #4c1d95;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: scale(0.96); }
+            to { opacity: 1; transform: scale(1); }
         }
     </style>
 </head>
 <body>
 <div class="game-area">
-    <!-- single row – no nested divs beyond this -->
     <div class="top-bar">
-        <span class="score">🏆 <span id="scoreDisplay">0</span></span>
-        <button class="restart" id="restartButton">↻ RESTART</button>
+        <div class="stats-group">
+            <div class="pill">🏆 Score: <span class="val" id="scoreDisplay">0</span></div>
+            <div class="pill">🐸 Size: <span class="val" id="sizeDisplay">1.00x</span></div>
+            <div class="pill">🍽️ Eaten: <span class="val" id="eatenDisplay">0</span></div>
+        </div>
+        <button class="restart" id="restartButton">↻ Restart</button>
     </div>
-    <canvas id="gameCanvas" width="640" height="480"></canvas>
-    <div class="hint">🐸 arrow keys / swipe · slow cars · reach 🏁</div>
-</div>
-<script>
-    (function() {
-        const canvas = document.getElementById('gameCanvas');
-        const ctx = canvas.getContext('2d');
-        const scoreSpan = document.getElementById('scoreDisplay');
 
-        // ---------- grid ----------
-        const COLS = 8;
-        const ROWS = 9;
-        const CELL_W = canvas.width / COLS;   // 80
-        const CELL_H = canvas.height / ROWS;  // 53.333
-
-        // ---------- state ----------
-        let score = 0;
-        let frog = { col: 3, row: 0 };  // bottom row 0
-
-        // cars: smooth fractional column, slower speeds
-        let cars = [];
-
-        const carEmojis = ['🚗', '🚙', '🚕', '🚌', '🚚', '🚓'];
-
-        // ---------- initialize cars – significantly slower ----------
-        function resetCars() {
-            cars = [];
-            const roadRows = [2, 3, 4, 5, 6];
-            roadRows.forEach(row => {
-                // 2 or 3 cars per row
-                const carCount = (row % 2 === 0) ? 3 : 2;
-                // alternate direction per row
-                const dir = (row % 2 === 0) ? 1 : -1;
-                for (let i = 0; i < carCount; i++) {
-                    const col = (i * 3 + row * 2) % COLS;
-                    const emoji = carEmojis[Math.floor(Math.random() * carEmojis.length)];
-                    // *** SLOWER SPEED: 0.008 – 0.018 cells/frame ***
-                    const speed = 0.008 + Math.random() * 0.010;
-                    cars.push({
-                        fCol: col,          // fractional column for smooth movement
-                        row: row,
-                        dir: dir,
-                        emoji: emoji,
-                        speed: speed
-                    });
-                }
-            });
-        }
-
-        // ---------- reset game (score + frog + cars) ----------
-        function resetGame() {
-            frog = { col: 3, row: 0 };
-            score = 0;
-            updateScore();
-            resetCars();
-        }
-
-        function updateScore() {
-            scoreSpan.textContent = score;
-        }
-
-        // ---------- collision: frog vs any car (rounded column) ----------
-        function checkCollision() {
-            for (let car of cars) {
-                const carCol = Math.round(car.fCol);
-                // wrap column into 0..COLS-1 for fair check
-                const wrappedCol = ((carCol % COLS) + COLS) % COLS;
-                if (car.row === frog.row && wrappedCol === frog.col) {
-                    return true;
-                }
-            }
-            return false;
-        }
-
-        // ---------- move frog ----------
-        function moveFrog(direction) {
-            let newCol = frog.col;
-            let newRow = frog.row;
-
-            if (direction === 'up') newRow = Math.min(frog.row + 1, ROWS - 1);
-            if (direction === 'down') newRow = Math.max(frog.row - 1, 0);
-            if (direction === 'left') newCol = Math.max(frog.col - 1, 0);
-            if (direction === 'right') newCol = Math.min(frog.col + 1, COLS - 1);
-
-            if (newCol === frog.col && newRow === frog.row) return;
-
-            const oldCol = frog.col, oldRow = frog.row;
-            frog.col = newCol;
-            frog.row = newRow;
-
-            // immediate collision check after tentative move
-            if (checkCollision()) {
-                frog.col = oldCol;
-                frog.row = oldRow;
-                return;
-            }
-
-            // win condition: reach top row (row 8)
-            if (frog.row === ROWS - 1) {
-                score++;
-                updateScore();
-                // respawn frog at start
-                frog.col = 3;
-                frog.row = 0;
-                // fresh cars so no immediate unfair hit
-                resetCars();
-            }
-        }
-
-        // ---------- update car positions ----------
-        function updateCars() {
-            for (let car of cars) {
-                car.fCol += car.dir * car.speed;
-
-                // wrap around with margin
-                if (car.fCol > COLS + 0.5) {
-                    car.fCol = -1.0;
-                } else if (car.fCol < -1.0) {
-                    car.fCol = COLS + 0.5;
-                }
-            }
-        }
-
-        // ---------- collision after car movement ----------
-        function checkCollisionAfterMove() {
-            for (let car of cars) {
-                const carCol = Math.round(car.fCol);
-                const wrappedCol = ((carCol % COLS) + COLS) % COLS;
-                if (car.row === frog.row && wrappedCol === frog.col) {
-                    // hit → reset frog to start
-                    frog.col = 3;
-                    frog.row = 0;
-                    // reset cars to avoid instant repeat
-                    resetCars();
-                    break;
-                }
-            }
-        }
-
-        // ---------- draw everything (clean, no extra decorations) ----------
-        function draw() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-            // ----- background rows -----
-            for (let row = 0; row < ROWS; row++) {
-                const y = canvas.height - (row + 1) * CELL_H;
-                let fillColor = '#2e7d32';
-
-                if (row === 0) fillColor = '#4caf50';        // start grass
-                else if (row === 1) fillColor = '#388e3c';   // safe grass
-                else if (row >= 2 && row <= 6) fillColor = '#2c3e50'; // road
-                else if (row === 7) fillColor = '#388e3c';   // safe grass
-                else if (row === 8) fillColor = '#b8860b';   // goal
-
-                ctx.fillStyle = fillColor;
-                ctx.fillRect(0, y, canvas.width, CELL_H);
-
-                // road lane markings
-                if (row >= 2 && row <= 6) {
-                    ctx.fillStyle = '#f1c40f';
-                    const dashY = y + CELL_H * 0.5;
-                    for (let col = 0; col < COLS; col++) {
-                        const dashX = col * CELL_W + CELL_W * 0.25;
-                        ctx.fillRect(dashX, dashY - 2, CELL_W * 0.5, 4);
-                    }
-                }
-
-                // subtle grid lines
-                ctx.strokeStyle = '#00000022';
-                ctx.lineWidth = 1;
-                for (let col = 0; col <= COLS; col++) {
-                    ctx.beginPath();
-                    ctx.moveTo(col * CELL_W, y);
-                    ctx.lineTo(col * CELL_W, y + CELL_H);
-                    ctx.stroke();
-                }
-            }
-
-            // ----- goal row checkered pattern + flag -----
-            const goalY = canvas.height - (8 + 1) * CELL_H;
-            for (let col = 0; col < COLS; col++) {
-                ctx.fillStyle = (col % 2 === 0) ? '#f5e6b0' : '#d4af37';
-                ctx.fillRect(col * CELL_W, goalY, CELL_W, CELL_H);
-                ctx.font = `${CELL_H * 0.5}px "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif`;
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.fillStyle = '#00000055';
-                ctx.fillText('🏁', col * CELL_W + CELL_W/2, goalY + CELL_H/2 + 2);
-                ctx.fillStyle = '#ffffffdd';
-                ctx.fillText('🏁', col * CELL_W + CELL_W/2, goalY + CELL_H/2);
-            }
-
-            // ----- draw cars (smooth position) -----
-            cars.forEach(car => {
-                let displayCol = car.fCol;
-                // wrap for drawing
-                if (displayCol > COLS) displayCol -= COLS;
-                if (displayCol < -0.5) displayCol += COLS;
-
-                const x = displayCol * CELL_W + CELL_W / 2;
-                const y = canvas.height - (car.row + 1) * CELL_H + CELL_H / 2;
-
-                // simple shadow for depth
-                ctx.shadowColor = '#00000080';
-                ctx.shadowBlur = 8;
-                ctx.shadowOffsetY = 3;
-                ctx.font = `${CELL_H * 0.8}px "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif`;
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.fillStyle = '#ffffff';
-                ctx.fillText(car.emoji, x, y);
-                // reset shadow
-                ctx.shadowColor = 'transparent';
-                ctx.shadowBlur = 0;
-                ctx.shadowOffsetY = 0;
-            });
-
-            // ----- draw frog with soft glow -----
-            const frogX = frog.col * CELL_W + CELL_W / 2;
-            const frogY = canvas.height - (frog.row + 1) * CELL_H + CELL_H / 2;
-
-            ctx.shadowColor = '#b3ffb3';
-            ctx.shadowBlur = 16;
-            ctx.font = `${CELL_H * 0.9}px "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif`;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillStyle = '#ffffff';
-            ctx.fillText('🐸', frogX, frogY);
-            ctx.shadowColor = 'transparent';
-            ctx.shadowBlur = 0;
-        }
-
-        // ---------- game loop ----------
-        function gameLoop() {
-            updateCars();
-            checkCollisionAfterMove();  // frog may be hit
-            draw();
-            requestAnimationFrame(gameLoop);
-        }
-
-        // ---------- keyboard ----------
-        function handleKey(e) {
-            const key = e.key;
-            if (key.startsWith('Arrow')) e.preventDefault();
-            if (key === 'ArrowUp') moveFrog('up');
-            else if (key === 'ArrowDown') moveFrog('down');
-            else if (key === 'ArrowLeft') moveFrog('left');
-            else if (key === 'ArrowRight') moveFrog('right');
-        }
-
-        // ---------- touch swipe (simple) ----------
-        let touchStartX = 0, touchStartY = 0;
-        let touchMoved = false;
-
-        function handleTouchStart(e) {
-            e.preventDefault();
-            const touch = e.touches[0];
-            touchStartX = touch.clientX;
-            touchStartY = touch.clientY;
-            touchMoved = false;
-        }
-
-        function handleTouchMove(e) {
-            e.preventDefault();
-            if (touchMoved) return;
-            if (e.touches.length === 0) return;
-            const touch = e.touches[0];
-            const dx = touch.clientX - touchStartX;
-            const dy = touch.clientY - touchStartY;
-            const absDx = Math.abs(dx);
-            const absDy = Math.abs(dy);
-
-            if (Math.max(absDx, absDy) < 18) return;
-
-            touchMoved = true;
-            if (absDx > absDy) {
-                if (dx > 0) moveFrog('right');
-                else moveFrog('left');
-            } else {
-                if (dy > 0) moveFrog('down');
-                else moveFrog('up');
-            }
-        }
-
-        function handleTouchEnd(e) {
-            e.preventDefault();
-            touchMoved = false;
-        }
-
-        // ---------- restart button ----------
-        document.getElementById('restartButton').addEventListener('click', () => {
-            resetGame();
-            draw();
-        });
-
-        // ---------- attach listeners ----------
-        window.addEventListener('keydown', handleKey);
-        canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
-        canvas.addEventListener('touchmove', handleTouchMove, { passive: false });
-        canvas.addEventListener('touchend', handleTouchEnd);
-        canvas.addEventListener('touchcancel', handleTouchEnd);
-
-        // ---------- init ----------
-        resetGame();
-        draw();
-        gameLoop();
-    })();
-</script>
-</body>
-</html>
+    <div class="canvas-wrapper">
+        <canvas id="gameCanvas" width="720" height="520"></canvas>
+        <div class="overlay" id="gameOverOverlay">
+            <div class="overlay-card">
+                <h2>CRUSHED! 💥</h2>
+                <p id="deathReason">Hit a much larger vehicle!</p>
+                <div class="overlay-stats">
+                    <p>🏆 Final Score: <strong id="finalScore">0</strong></p>
+                    <p>🐸 Max Size: <strong id="finalSize">1.00x</strong></p>
+                    <p>🍽️ Vehicles Eaten: <strong id="finalEaten">0</strong></p>
+                </div>

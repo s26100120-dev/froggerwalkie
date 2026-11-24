@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🐸 Giant Frog · Eat & Grow</title>
+    <title>🐸 Giant Frog · Eat &amp; Grow</title>
     <style>
         * {
             box-sizing: border-box;
@@ -109,7 +109,6 @@
             font-weight: 600;
             letter-spacing: 0.3px;
         }
-        /* Game Over Modal Overlay */
         .overlay {
             position: absolute;
             inset: 0;
@@ -200,3 +199,587 @@
                     <p>🐸 Max Size: <strong id="finalSize">1.00x</strong></p>
                     <p>🍽️ Vehicles Eaten: <strong id="finalEaten">0</strong></p>
                 </div>
+                <button class="play-again-btn" id="playAgainButton">🐸 Play Again</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="hint">🐸 Arrow Keys / WASD / Swipe / Tap · Eat smaller vehicles · Dodge larger ones!</div>
+</div>
+
+<script>
+(function() {
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    const scoreSpan = document.getElementById('scoreDisplay');
+    const sizeSpan = document.getElementById('sizeDisplay');
+    const eatenSpan = document.getElementById('eatenDisplay');
+    const overlay = document.getElementById('gameOverOverlay');
+    const deathReasonEl = document.getElementById('deathReason');
+    const finalScoreEl = document.getElementById('finalScore');
+    const finalSizeEl = document.getElementById('finalSize');
+    const finalEatenEl = document.getElementById('finalEaten');
+
+    const BASE_UNIT = 56;
+
+    const VEHICLE_TIERS = [
+        { name: 'Skateboard',   emojis: ['🛹'],             radius: 0.26, speedMin: 1.4, speedMax: 2.3, points: 1 },
+        { name: 'Scooter',      emojis: ['🛴', '🚲'],       radius: 0.34, speedMin: 1.6, speedMax: 2.6, points: 2 },
+        { name: 'Motorcycle',   emojis: ['🛵', '🏍️'],       radius: 0.42, speedMin: 2.0, speedMax: 3.2, points: 3 },
+        { name: 'Compact Car',  emojis: ['🚗', '🚕', '🚙'], radius: 0.54, speedMin: 1.8, speedMax: 3.0, points: 5 },
+        { name: 'Police / Van', emojis: ['🚓', '🚐', '🚑'], radius: 0.68, speedMin: 2.0, speedMax: 3.3, points: 8 },
+        { name: 'Pickup / SUV', emojis: ['🛻', '🚜'],       radius: 0.84, speedMin: 1.6, speedMax: 2.7, points: 12 },
+        { name: 'City Bus',     emojis: ['🚌', '🚎'],       radius: 1.08, speedMin: 1.5, speedMax: 2.4, points: 18 },
+        { name: 'Heavy Truck',  emojis: ['🚚', '🚛', '🚒'], radius: 1.38, speedMin: 1.4, speedMax: 2.2, points: 28 },
+        { name: 'Locomotive',   emojis: ['🚂', '🚆'],       radius: 1.80, speedMin: 1.7, speedMax: 2.6, points: 45 },
+        { name: 'Cruise Ship',  emojis: ['🛳️', '🚢'],       radius: 2.40, speedMin: 1.2, speedMax: 1.9, points: 75 },
+        { name: 'Airliner',     emojis: ['✈️', '🛩️'],       radius: 3.20, speedMin: 2.2, speedMax: 3.4, points: 120 },
+        { name: 'Space Rocket', emojis: ['🚀', '🛸'],       radius: 4.30, speedMin: 2.5, speedMax: 3.8, points: 200 }
+    ];
+
+    let score = 0;
+    let eatenCount = 0;
+    let isGameOver = false;
+    let highestRowReached = 0;
+
+    let frog = {
+        x: 0,
+        y: 0,
+        targetX: 0,
+        targetY: 0,
+        radius: 0.45,
+        hopAnim: 0
+    };
+
+    let camera = {
+        x: 0,
+        y: 3.5,
+        zoom: 1.0
+    };
+
+    let lanes = new Map();
+    let popups = [];
+    let particles = [];
+    let lastTime = performance.now();
+
+    function getSizeMultiplier() {
+        return frog.radius / 0.45;
+    }
+
+    function updateHUD() {
+        const mult = getSizeMultiplier();
+        scoreSpan.textContent = Math.floor(score).toLocaleString();
+        sizeSpan.textContent = mult.toFixed(2) + 'x';
+        eatenSpan.textContent = eatenCount;
+    }
+
+    function ensureLane(r) {
+        if (lanes.has(r)) return lanes.get(r);
+
+        const isSafe = (r === 0) || (r > 0 && r % 7 === 0);
+        if (isSafe) {
+            const lane = {
+                row: r,
+                type: 'safe',
+                vehicles: []
+            };
+            lanes.set(r, lane);
+            return lane;
+        }
+
+        const dir = (r % 2 === 0) ? 1 : -1;
+        const lane = {
+            row: r,
+            type: 'road',
+            dir: dir,
+            vehicles: []
+        };
+
+        populateLaneVehicles(lane);
+        lanes.set(r, lane);
+        return lane;
+    }
+
+    function pickScaledVehicleTemplate(frogR) {
+        const baseMaxTierRadius = VEHICLE_TIERS[VEHICLE_TIERS.length - 1].radius;
+        let extraScale = 1.0;
+        if (frogR > baseMaxTierRadius * 0.65) {
+            extraScale = frogR / (baseMaxTierRadius * 0.65);
+        }
+
+        const wantEdible = Math.random() < 0.65;
+        const ratio = wantEdible
+            ? (0.35 + Math.random() * 0.52)
+            : (1.12 + Math.random() * 0.65);
+
+        const desiredRadius = frogR * ratio;
+
+        let bestTier = VEHICLE_TIERS[0];
+        let bestDiff = Infinity;
+        for (const tier of VEHICLE_TIERS) {
+            const effectiveR = tier.radius * extraScale;
+            const diff = Math.abs(effectiveR - desiredRadius);
+            if (diff < bestDiff) {
+                bestDiff = diff;
+                bestTier = tier;
+            }
+        }
+
+        const emoji = bestTier.emojis[Math.floor(Math.random() * bestTier.emojis.length)];
+        const radius = bestTier.radius * extraScale;
+        const speed = (bestTier.speedMin + Math.random() * (bestTier.speedMax - bestTier.speedMin)) * Math.sqrt(extraScale);
+        const points = Math.max(1, Math.round(bestTier.points * extraScale));
+
+        return {
+            name: bestTier.name,
+            emoji: emoji,
+            radius: radius,
+            speed: speed,
+            points: points
+        };
+    }
+
+    function populateLaneVehicles(lane) {
+        const halfSpan = getVisibleWorldHalfWidth() + 8;
+        const count = 4;
+        const spacing = (halfSpan * 2) / count;
+
+        for (let i = 0; i < count; i++) {
+            const tpl = pickScaledVehicleTemplate(frog.radius);
+            const x = -halfSpan + i * spacing + (Math.random() - 0.5) * (spacing * 0.45);
+            lane.vehicles.push(Object.assign({
+                x: x,
+                dir: lane.dir
+            }, tpl));
+        }
+    }
+
+    function getVisibleWorldHalfWidth() {
+        const worldWidth = (canvas.width / BASE_UNIT) / camera.zoom;
+        return worldWidth * 0.5;
+    }
+
+    function getVisibleWorldHalfHeight() {
+        const worldHeight = (canvas.height / BASE_UNIT) / camera.zoom;
+        return worldHeight * 0.5;
+    }
+
+    function addPopup(x, y, text, color) {
+        popups.push({
+            x: x,
+            y: y,
+            text: text,
+            color: color,
+            life: 1.0
+        });
+    }
+
+    function addParticles(x, y, color, count) {
+        const total = count || 12;
+        for (let i = 0; i < total; i++) {
+            const angle = (Math.PI * 2 * i) / total + Math.random() * 0.4;
+            const speed = 1.5 + Math.random() * 3.5;
+            particles.push({
+                x: x,
+                y: y,
+                vx: Math.cos(angle) * speed,
+                vy: Math.sin(angle) * speed,
+                radius: (0.06 + Math.random() * 0.08) * getSizeMultiplier(),
+                color: color,
+                life: 1.0
+            });
+        }
+    }
+
+    function resetGame() {
+        score = 0;
+        eatenCount = 0;
+        isGameOver = false;
+        highestRowReached = 0;
+
+        frog = {
+            x: 0,
+            y: 0,
+            targetX: 0,
+            targetY: 0,
+            radius: 0.45,
+            hopAnim: 0
+        };
+
+        camera = {
+            x: 0,
+            y: 3.2,
+            zoom: 1.0
+        };
+
+        lanes.clear();
+        popups = [];
+        particles = [];
+
+        for (let r = -3; r <= 14; r++) {
+            ensureLane(r);
+        }
+
+        overlay.classList.remove('active');
+        updateHUD();
+    }
+
+    function moveFrog(dx, dy) {
+        if (isGameOver) return;
+
+        const step = Math.max(1, Math.round(getSizeMultiplier() * 0.55));
+        frog.targetX += dx * step;
+        frog.targetY = Math.max(0, frog.targetY + dy * step);
+        frog.hopAnim = 1.0;
+
+        if (frog.targetY > highestRowReached) {
+            const rowsGained = frog.targetY - highestRowReached;
+            highestRowReached = frog.targetY;
+            score += rowsGained * 2;
+
+            if (Math.round(frog.targetY) % 7 === 0) {
+                score += 10;
+                addPopup(frog.targetX, frog.targetY + 0.5, 'Milestone Bonus +10!', '#7e22ce');
+            }
+            updateHUD();
+        }
+    }
+
+    function triggerGameOver(vehicle) {
+        isGameOver = true;
+        addParticles(frog.x, frog.y, '#ef4444', 24);
+        deathReasonEl.textContent = 'Crushed by a giant ' + vehicle.name + ' (' + vehicle.emoji + ')!';
+        finalScoreEl.textContent = Math.floor(score).toLocaleString();
+        finalSizeEl.textContent = getSizeMultiplier().toFixed(2) + 'x';
+        finalEatenEl.textContent = eatenCount;
+        overlay.classList.add('active');
+    }
+
+    function update(dt) {
+        if (isGameOver) {
+            updateEffects(dt);
+            return;
+        }
+
+        const moveLerp = Math.min(1, dt * 16);
+        frog.x += (frog.targetX - frog.x) * moveLerp;
+        frog.y += (frog.targetY - frog.y) * moveLerp;
+        if (frog.hopAnim > 0) {
+            frog.hopAnim = Math.max(0, frog.hopAnim - dt * 5);
+        }
+
+        const desiredZoom = 1.0 / Math.pow(getSizeMultiplier(), 0.78);
+        camera.zoom += (desiredZoom - camera.zoom) * Math.min(1, dt * 4.5);
+
+        const lookAheadY = 2.2 / camera.zoom;
+        camera.x += (frog.x - camera.x) * Math.min(1, dt * 6);
+        camera.y += ((frog.y + lookAheadY) - camera.y) * Math.min(1, dt * 6);
+
+        const halfH = getVisibleWorldHalfHeight();
+        const halfW = getVisibleWorldHalfWidth();
+        const minRow = Math.floor(camera.y - halfH - 3);
+        const maxRow = Math.ceil(camera.y + halfH + 4);
+
+        for (let r = minRow; r <= maxRow; r++) {
+            ensureLane(r);
+        }
+        lanes.forEach(function(_, r) {
+            if (r < minRow - 10) {
+                lanes.delete(r);
+            }
+        });
+
+        const spawnMargin = halfW + 5 * getSizeMultiplier();
+
+        for (let r = minRow; r <= maxRow; r++) {
+            const lane = lanes.get(r);
+            if (!lane || lane.type !== 'road') continue;
+
+            for (let i = lane.vehicles.length - 1; i >= 0; i--) {
+                const v = lane.vehicles[i];
+                v.x += v.dir * v.speed * dt;
+
+                if (v.dir === 1 && v.x - v.radius > camera.x + spawnMargin) {
+                    const tpl = pickScaledVehicleTemplate(frog.radius);
+                    Object.assign(v, tpl, { x: camera.x - spawnMargin - tpl.radius });
+                } else if (v.dir === -1 && v.x + v.radius < camera.x - spawnMargin) {
+                    const tpl = pickScaledVehicleTemplate(frog.radius);
+                    Object.assign(v, tpl, { x: camera.x + spawnMargin + tpl.radius });
+                }
+
+                const dx = v.x - frog.x;
+                const dy = lane.row - frog.y;
+                const dist = Math.hypot(dx, dy);
+                const hitDist = (frog.radius + v.radius) * 0.78;
+
+                if (dist < hitDist) {
+                    if (frog.radius >= v.radius * 0.96) {
+                        const growthArea = (v.radius * v.radius) * 0.16;
+                        frog.radius = Math.sqrt(frog.radius * frog.radius + growthArea);
+                        score += v.points;
+                        eatenCount++;
+
+                        addPopup(v.x, lane.row + 0.3, 'YUM! +' + v.points, '#15803d');
+                        addParticles(v.x, lane.row, '#a855f7', 14);
+
+                        const tpl = pickScaledVehicleTemplate(frog.radius);
+                        const newX = (v.dir === 1)
+                            ? camera.x - spawnMargin - tpl.radius
+                            : camera.x + spawnMargin + tpl.radius;
+                        lane.vehicles[i] = Object.assign({
+                            x: newX,
+                            dir: v.dir
+                        }, tpl);
+
+                        updateHUD();
+                    } else {
+                        triggerGameOver(v);
+                        return;
+                    }
+                }
+            }
+        }
+
+        updateEffects(dt);
+    }
+
+    function updateEffects(dt) {
+        for (let i = popups.length - 1; i >= 0; i--) {
+            const p = popups[i];
+            p.y += dt * 1.4;
+            p.life -= dt * 1.15;
+            if (p.life <= 0) popups.splice(i, 1);
+        }
+        for (let i = particles.length - 1; i >= 0; i--) {
+            const pt = particles[i];
+            pt.x += pt.vx * dt;
+            pt.y += pt.vy * dt;
+            pt.life -= dt * 1.8;
+            if (pt.life <= 0) particles.splice(i, 1);
+        }
+    }
+
+    function worldToScreen(wx, wy) {
+        const pxPerUnit = BASE_UNIT * camera.zoom;
+        const sx = canvas.width * 0.5 + (wx - camera.x) * pxPerUnit;
+        const sy = canvas.height * 0.5 - (wy - camera.y) * pxPerUnit;
+        return { x: sx, y: sy, scale: pxPerUnit };
+    }
+
+    function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        const pxPerUnit = BASE_UNIT * camera.zoom;
+        const halfH = getVisibleWorldHalfHeight();
+        const halfW = getVisibleWorldHalfWidth();
+        const minRow = Math.floor(camera.y - halfH - 2);
+        const maxRow = Math.ceil(camera.y + halfH + 2);
+
+        for (let r = minRow; r <= maxRow; r++) {
+            const lane = ensureLane(r);
+            const topScreen = worldToScreen(0, r + 0.5).y;
+            const rowHeight = pxPerUnit + 0.8;
+
+            if (lane.type === 'safe') {
+                ctx.fillStyle = (r === 0) ? '#e9d5ff' : '#ddd6fe';
+                ctx.fillRect(0, topScreen, canvas.width, rowHeight);
+
+                if (pxPerUnit > 14) {
+                    ctx.fillStyle = 'rgba(147, 51, 234, 0.14)';
+                    const step = 3;
+                    const startCol = Math.floor((camera.x - halfW) / step) * step;
+                    const endCol = Math.ceil((camera.x + halfW) / step) * step;
+                    for (let c = startCol; c <= endCol; c += step) {
+                        const pos = worldToScreen(c + ((Math.abs(r) % 2) * 1.5), r);
+                        ctx.beginPath();
+                        ctx.arc(pos.x, pos.y, pxPerUnit * 0.12, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                }
+            } else {
+                ctx.fillStyle = (Math.abs(r) % 2 === 0) ? '#3b2854' : '#432e60';
+                ctx.fillRect(0, topScreen, canvas.width, rowHeight);
+
+                if (pxPerUnit > 8) {
+                    ctx.strokeStyle = 'rgba(216, 180, 254, 0.35)';
+                    ctx.lineWidth = Math.max(1, pxPerUnit * 0.04);
+                    ctx.setLineDash([pxPerUnit * 0.45, pxPerUnit * 0.45]);
+                    const lineY = worldToScreen(0, r + 0.5).y;
+                    ctx.beginPath();
+                    ctx.moveTo(0, lineY);
+                    ctx.lineTo(canvas.width, lineY);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+                }
+            }
+        }
+
+        for (let r = minRow; r <= maxRow; r++) {
+            const lane = lanes.get(r);
+            if (!lane || lane.type !== 'road') continue;
+
+            for (let i = 0; i < lane.vehicles.length; i++) {
+                const v = lane.vehicles[i];
+                const pos = worldToScreen(v.x, lane.row);
+                const radiusPx = v.radius * pxPerUnit;
+
+                if (pos.x + radiusPx < -40 || pos.x - radiusPx > canvas.width + 40) continue;
+
+                const isEdible = frog.radius >= v.radius * 0.96;
+
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(pos.x, pos.y, radiusPx * 0.92, 0, Math.PI * 2);
+                ctx.fillStyle = isEdible
+                    ? 'rgba(74, 222, 128, 0.18)'
+                    : 'rgba(248, 113, 113, 0.22)';
+                ctx.fill();
+                ctx.lineWidth = Math.max(1.5, radiusPx * 0.06);
+                ctx.strokeStyle = isEdible
+                    ? 'rgba(74, 222, 128, 0.55)'
+                    : 'rgba(248, 113, 113, 0.65)';
+                ctx.stroke();
+
+                ctx.translate(pos.x, pos.y);
+                if (v.dir === 1) {
+                    ctx.scale(-1, 1);
+                }
+
+                const fontSize = Math.max(10, radiusPx * 1.85);
+                ctx.font = fontSize + 'px "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(v.emoji, 0, fontSize * 0.05);
+                ctx.restore();
+            }
+        }
+
+        for (let i = 0; i < particles.length; i++) {
+            const pt = particles[i];
+            const pos = worldToScreen(pt.x, pt.y);
+            ctx.save();
+            ctx.globalAlpha = Math.max(0, pt.life);
+            ctx.fillStyle = pt.color;
+            ctx.beginPath();
+            ctx.arc(pos.x, pos.y, Math.max(2, pt.radius * pxPerUnit), 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        }
+
+        const frogPos = worldToScreen(frog.x, frog.y);
+        const frogRadiusPx = frog.radius * pxPerUnit;
+        const hopBounce = Math.sin(frog.hopAnim * Math.PI) * (frogRadiusPx * 0.28);
+
+        ctx.save();
+        ctx.shadowColor = '#c084fc';
+        ctx.shadowBlur = Math.max(10, frogRadiusPx * 0.45);
+
+        const frogFontSize = Math.max(16, frogRadiusPx * 1.95);
+        ctx.font = frogFontSize + 'px "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('🐸', frogPos.x, frogPos.y - hopBounce + frogFontSize * 0.04);
+        ctx.restore();
+
+        for (let i = 0; i < popups.length; i++) {
+            const p = popups[i];
+            const pos = worldToScreen(p.x, p.y);
+            ctx.save();
+            ctx.globalAlpha = Math.max(0, p.life);
+            ctx.font = '800 16px "Segoe UI", system-ui, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillStyle = '#ffffff';
+            ctx.strokeStyle = '#3b0764';
+            ctx.lineWidth = 4;
+            ctx.strokeText(p.text, pos.x, pos.y);
+            ctx.fillStyle = p.color;
+            ctx.fillText(p.text, pos.x, pos.y);
+            ctx.restore();
+        }
+    }
+
+    function gameLoop(now) {
+        const dt = Math.min(0.05, (now - lastTime) / 1000);
+        lastTime = now;
+
+        update(dt);
+        draw();
+        requestAnimationFrame(gameLoop);
+    }
+
+    window.addEventListener('keydown', function(e) {
+        if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].indexOf(e.key) !== -1) {
+            e.preventDefault();
+        }
+        if (isGameOver && (e.key === 'Enter' || e.key === ' ')) {
+            resetGame();
+            return;
+        }
+        const key = e.key.toLowerCase();
+        if (key === 'arrowup' || key === 'w') moveFrog(0, 1);
+        else if (key === 'arrowdown' || key === 's') moveFrog(0, -1);
+        else if (key === 'arrowleft' || key === 'a') moveFrog(-1, 0);
+        else if (key === 'arrowright' || key === 'd') moveFrog(1, 0);
+    });
+
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let touchHandled = false;
+
+    canvas.addEventListener('touchstart', function(e) {
+        e.preventDefault();
+        const t = e.touches[0];
+        touchStartX = t.clientX;
+        touchStartY = t.clientY;
+        touchHandled = false;
+    }, { passive: false });
+
+    canvas.addEventListener('touchmove', function(e) {
+        e.preventDefault();
+        if (touchHandled || e.touches.length === 0) return;
+        const t = e.touches[0];
+        const dx = t.clientX - touchStartX;
+        const dy = t.clientY - touchStartY;
+        if (Math.max(Math.abs(dx), Math.abs(dy)) < 20) return;
+
+        touchHandled = true;
+        if (Math.abs(dx) > Math.abs(dy)) {
+            moveFrog(dx > 0 ? 1 : -1, 0);
+        } else {
+            moveFrog(0, dy > 0 ? -1 : 1);
+        }
+    }, { passive: false });
+
+    canvas.addEventListener('touchend', function(e) {
+        e.preventDefault();
+        if (!touchHandled) {
+            moveFrog(0, 1);
+        }
+    }, { passive: false });
+
+    canvas.addEventListener('click', function(e) {
+        if (isGameOver) return;
+        const rect = canvas.getBoundingClientRect();
+        const clickX = ((e.clientX - rect.left) / rect.width) * canvas.width;
+        const clickY = ((e.clientY - rect.top) / rect.height) * canvas.height;
+        const frogScreen = worldToScreen(frog.x, frog.y);
+
+        const dx = clickX - frogScreen.x;
+        const dy = clickY - frogScreen.y;
+        if (Math.abs(dx) > Math.abs(dy)) {
+            moveFrog(dx > 0 ? 1 : -1, 0);
+        } else {
+            moveFrog(0, dy > 0 ? -1 : 1);
+        }
+    });
+
+    document.getElementById('restartButton').addEventListener('click', resetGame);
+    document.getElementById('playAgainButton').addEventListener('click', resetGame);
+
+    resetGame();
+    requestAnimationFrame(gameLoop);
+})();
+</script>
+</body>
+</html>
